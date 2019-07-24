@@ -1,0 +1,20 @@
+{
+  "name": "forrestjs",
+  "version": "0.0.1",
+  "description": "JS connector to forrest",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "github.com/ddidwyll/forrestjs"
+  },
+  "keywords": [
+    "forrest",
+    "svelte",
+    "db"
+  ],
+  "author": "Phil D'Oz <ddidwyll@gmail.com>",
+  "license": "MIT"
+}
