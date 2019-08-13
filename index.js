@@ -8,12 +8,12 @@ const headers = {
 }
 
 class API {
-  constructor (config, alert) {
+  constructor (config = {}, bases = [], alert) {
     this.host = (config.host || location.hostname) + ':'
     this.host += config.port || location.port
     this.alert = alert || console.log
 
-    this.listen()
+    this.events()
 
     const { subscribe, set, update } = writable(false)
     this.busy = { subscribe }
@@ -30,17 +30,41 @@ class API {
         return false
       })
   }
-  listen () {
+  async events () {
     const { set, subscribe } = debounced('frLastUpdate', '')
     this.last = { subscribe }
     this.query = persist('frUpdateQuery', {})
+    let last = get(this.last)
+    const hourAgo = (Date.now() - 3600).toString()
+    const monthAgo = (Date.now() - 25 * 24 * 3600).toString()
+
+    if (hourAgo < last > monthAgo) {
+      const res = await fetch(
+        `//events.${this.host}/batch/${last}`
+      ).catch(error)
+      if (!res || res.status !== 200) return
+      const events = await res.json().catch(error)
+      if (events && events.length) {
+        this.query.update(query => {
+          events.forEach(event => {
+            query[event.branch] = [
+              ...(query[event.branch] || []),
+              event
+            ]
+          })
+          return { ...query }
+        })
+        last = Math.max(...events.map(item => item.time)).toString()
+        set(last)
+      }
+    }
 
     new EventSource(
-      `//events.${this.host}/${USERNAME}/${get(this.last)}`
+      `//events.${this.host}/stream/${USERNAME}/${last}`
     ).onmessage = e => {
       this.query.update(query => {
-        if (!query) return query
         const data = JSON.parse(e.data)
+        if (!query) return query
         query[data.branch] = [...(query[data.branch] || []), data]
         set(e.lastEventId)
         return { ...query }
@@ -76,10 +100,12 @@ class DB {
     this.subscribe = subscribe
   }
   localStore () {
-    const { subscribe, update } = deferred(this.name, [])
+    const { subscribe, update, set } = deferred(this.name, [])
     const get = (id, store) => store.findIndex(item => item.id === id)
     this.store = {
       subscribe,
+      replace: async items =>
+        Array.isArray(items) ? set(items) : undefined,
       post: async item =>
         (await update(items => [...items, item])) || item.id,
       put: async item =>
@@ -107,8 +133,12 @@ class DB {
         const result = await Promise.all(
           q.map(e => this.fetch(e))
         ).catch(error)
+        if (result) {
+          query[this.name] = q.filter(
+            item => !~result.indexOf(item.id)
+          )
+        }
         this.release()
-        query[this.name] = q.filter(item => item.id in result)
         return { ...query }
       })
     })
@@ -117,10 +147,10 @@ class DB {
     if (event.action === 'delete') {
       return this.store.delete(event.id)
     }
-    return fetch(`//rest.${this.host}/${this.name}/${event.id}`)
+    return fetch(`//tree.${this.host}/rest/${this.name}/${event.id}`)
       .catch(error)
       .then(res =>
-        res.status === 200
+        res && res.status === 200
           ? res
             .json()
             .catch(error)
@@ -130,7 +160,7 @@ class DB {
   }
   pust (item, put = false) {
     if (!this.validate(item)) return this.alert('lol')
-    return fetch(`//rest.${this.host}/${this.name}`, {
+    return fetch(`//tree.${this.host}/rest/${this.name}`, {
       method: put ? 'PUT' : 'POST',
       headers: headers,
       body: JSON.stringify(item)
@@ -138,6 +168,11 @@ class DB {
   }
   async post (item) {
     const res = await this.pust(item)
+    const message = await res.json()
+    this.alert(message)
+  }
+  async put (item) {
+    const res = await this.pust(item, true)
     const message = await res.json()
     this.alert(message)
   }
