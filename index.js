@@ -3,9 +3,12 @@ import persist, { deferred, debounced } from 'svelte-persist'
 
 const USERNAME = 'user'
 const error = e => console.error(e)
-const headers = {
+const maxTime = arr => Math.max(...arr.map(i => i.upd)).toString()
+const HEADERS = {
   'Content-Type': 'application/json'
 }
+const HOURAGO = (Date.now() - 3600).toString()
+const MONTHAGO = (Date.now() - 25 * 24 * 3600).toString()
 
 class API {
   constructor (config = {}, bases = [], alert) {
@@ -31,14 +34,12 @@ class API {
       })
   }
   async events () {
-    const { set, subscribe } = debounced('frLastUpdate', '')
+    const { set, subscribe } = debounced('forrestLastUpdate', '')
     this.last = { subscribe }
-    this.query = persist('frUpdateQuery', {})
+    this.query = persist('forrestUpdateQuery', {})
     let last = get(this.last)
-    const hourAgo = (Date.now() - 3600).toString()
-    const monthAgo = (Date.now() - 25 * 24 * 3600).toString()
 
-    if (hourAgo < last > monthAgo) {
+    if (HOURAGO < last > MONTHAGO) {
       const res = await fetch(
         `//events.${this.host}/batch/${last}`
       ).catch(error)
@@ -54,7 +55,7 @@ class API {
           })
           return { ...query }
         })
-        last = Math.max(...events.map(item => item.time)).toString()
+        last = maxTime(events)
         set(last)
       }
     }
@@ -84,7 +85,7 @@ class API {
 class DB {
   constructor () {
     this.init(arguments[0])
-    this.listen()
+    this.fetchAll().then(() => this.listen())
   }
   init (args) {
     for (const key in args) {
@@ -104,7 +105,7 @@ class DB {
     const get = (id, store) => store.findIndex(item => item.id === id)
     this.store = {
       subscribe,
-      replace: async items =>
+      batch: async items =>
         Array.isArray(items) ? set(items) : undefined,
       post: async item =>
         (await update(items => [...items, item])) || item.id,
@@ -122,6 +123,20 @@ class DB {
           return [...items]
         })) || id
     }
+  }
+  async fetchAll () {
+    const { set, subscribe } = persist(this.name + 'LastUpdate', '')
+    this.updateLast = time => (time ? set(time) : undefined)
+    this.lastUpdate = { subscribe }
+    let last = get(this.lastUpdate)
+    if (last && last < MONTHAGO) return
+    const res = await fetch(
+      `//tree.${this.host}/batch/${this.name}`
+    ).catch(error)
+    if (!res || res.status !== 200) return
+    const items = await res.json().catch(error)
+    this.store.batch(items)
+    set(maxTime(items))
   }
   listen () {
     this.last.subscribe(() => {
@@ -144,9 +159,12 @@ class DB {
     })
   }
   fetch (event) {
-    if (event.action === 'delete') {
+    if (~['delete', 'archive'].indexOf(event.action)) {
       return this.store.delete(event.id)
     }
+    const last = get(this.lastUpdate)
+    if (event.time <= last) return event.id
+    else this.updateLast(event.time)
     return fetch(`//tree.${this.host}/rest/${this.name}/${event.id}`)
       .catch(error)
       .then(res =>
@@ -162,7 +180,7 @@ class DB {
     if (!this.validate(item)) return this.alert('lol')
     return fetch(`//tree.${this.host}/rest/${this.name}`, {
       method: put ? 'PUT' : 'POST',
-      headers: headers,
+      headers: HEADERS,
       body: JSON.stringify(item)
     })
   }
