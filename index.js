@@ -11,10 +11,13 @@ const HOURAGO = (Date.now() - 3600).toString()
 const MONTHAGO = (Date.now() - 25 * 24 * 3600).toString()
 
 class API {
-  constructor (config = {}, bases = [], alert) {
+  constructor (config = {}, alert) {
     this.host = (config.host || location.hostname) + ':'
     this.host += config.port || location.port
     this.alert = alert || console.log
+
+    this.idbReq = indexedDB.open('forrest', 1)
+    this.idbReq.onerror = error
 
     this.events()
 
@@ -91,7 +94,9 @@ class DB {
     for (const key in args) {
       this[key] = args[key]
     }
-    if (!Array.isArray(this.indexed)) {
+    if (Array.isArray(this.indexed)) {
+      this.indexStore()
+    } else {
       this.localStore()
     }
     const { subscribe } = derived(
@@ -99,6 +104,20 @@ class DB {
       ([busy, store]) => ({ busy, store })
     )
     this.subscribe = subscribe
+  }
+  indexStore () {
+    this.idbReq.addEventListener('upgradeneeded', e => {
+      const os = e.target.result.createObjectStore(this.name, {
+        keyPath: 'id'
+      })
+      os.createIndex("upd", "upd")
+      this.indexed.forEach(index => os.createIndex(index, index))
+    })
+    this.idbReq.addEventListener('success', e => {
+      this.db = e.target.result
+      console.log(this.db)
+    })
+    console.log(this.db)
   }
   localStore () {
     const { subscribe, update, set } = deferred(this.name, [])
