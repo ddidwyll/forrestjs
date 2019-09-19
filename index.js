@@ -1,5 +1,6 @@
 import { writable, get, derived } from 'svelte/store'
 import persist, { deferred, debounced } from 'svelte-persist'
+import { openDB } from 'idb'
 
 const USERNAME = 'user'
 const error = e => console.error(e)
@@ -15,9 +16,6 @@ class API {
     this.host = (config.host || location.hostname) + ':'
     this.host += config.port || location.port
     this.alert = alert || console.log
-
-    this.idbReq = indexedDB.open('forrest', 1)
-    this.idbReq.onerror = error
 
     this.events()
 
@@ -75,11 +73,11 @@ class API {
       })
     }
   }
-  db (name, indexed = false, validate = () => true) {
+  db (name, indexes = false, validate = () => true) {
     return new DB({
       ...this,
       name,
-      indexed,
+      indexes,
       validate
     })
   }
@@ -87,15 +85,16 @@ class API {
 
 class DB {
   constructor () {
-    this.init(arguments[0])
-    this.fetchAll().then(() => this.listen())
+    this.init(arguments[0]).then(() =>
+      this.fetchAll().then(() => this.listen())
+    )
   }
-  init (args) {
+  async init (args) {
     for (const key in args) {
       this[key] = args[key]
     }
-    if (Array.isArray(this.indexed)) {
-      this.indexStore()
+    if (this.indexes && this.indexes.constructor === Object) {
+      await this.indexStore()
     } else {
       this.localStore()
     }
@@ -105,19 +104,37 @@ class DB {
     )
     this.subscribe = subscribe
   }
-  indexStore () {
-    this.idbReq.addEventListener('upgradeneeded', e => {
-      const os = e.target.result.createObjectStore(this.name, {
-        keyPath: 'id'
-      })
-      os.createIndex("upd", "upd")
-      this.indexed.forEach(index => os.createIndex(index, index))
+  async indexStore () {
+    const indexes = this.indexes
+    this.db = await openDB(this.name, 1, {
+      upgrade (db) {
+        const is = {
+          ...indexes,
+          upd: 'upd',
+          uid: 'uid',
+          gid: 'gid'
+        }
+        const store = db.createObjectStore('store', {
+          keyPath: 'id'
+        })
+        for (const key in is) {
+          store.createIndex(key, is[key])
+        }
+      }
     })
-    this.idbReq.addEventListener('success', e => {
-      this.db = e.target.result
-      console.log(this.db)
-    })
-    console.log(this.db)
+    this.store = {
+      batch: async items => {
+        if (!Array.isArray(items)) return
+        const tx = this.db.transaction('store', 'readwrite')
+        tx.store.clear()
+        items.forEach(item => tx.store.add(item))
+        await tx.done.catch(error)
+      },
+      get: async id => await this.db.get('store', id),
+      post: async item => await this.db.put('store', item),
+      put: async item => await this.db.put('store', item),
+      delete: async id => await this.db.delete('store', id)
+    }
   }
   localStore () {
     const { subscribe, update, set } = deferred(this.name, [])
@@ -160,6 +177,7 @@ class DB {
   listen () {
     this.last.subscribe(() => {
       this.query.update(async query => {
+        query = await query
         if (!query) return query
         const q = query[this.name]
         if (!q || !q.length) return query
@@ -197,21 +215,43 @@ class DB {
   }
   pust (item, put = false) {
     if (!this.validate(item)) return this.alert('lol')
-    return fetch(`//tree.${this.host}/rest/${this.name}`, {
-      method: put ? 'PUT' : 'POST',
-      headers: HEADERS,
-      body: JSON.stringify(item)
-    })
+    this.take()
+    return fetch(
+      `//tree.${this.host}/rest/${this.name}/${put ? item.id : ''}`,
+      {
+        method: put ? 'PUT' : 'POST',
+        headers: HEADERS,
+        body: JSON.stringify(item)
+      }
+    ).catch(error)
+  }
+  async delete (id, to = '') {
+    this.take()
+    const res = await fetch(
+      `//tree.${this.host}/rest/${this.name}/${id}/${to}`,
+      {
+        method: 'DELETE',
+        headers: HEADERS
+      }
+    ).catch(error)
+    return this._response(res)
   }
   async post (item) {
     const res = await this.pust(item)
-    const message = await res.json()
-    this.alert(message)
+    return this._response(res)
   }
   async put (item) {
     const res = await this.pust(item, true)
-    const message = await res.json()
-    this.alert(message)
+    return this._response(res)
+  }
+  async _response (res) {
+    if (!res) return 503
+    if (!~[204, 404].indexOf(res.status)) {
+      const message = await res.json().catch(error)
+      this.alert(message || 'success')
+    }
+    this.release()
+    return res.status || 500
   }
   //   this.synced = persist(name + 'LastChange', {
   //     current: 0,
