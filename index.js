@@ -1,5 +1,5 @@
 import { writable, get, derived } from 'svelte/store'
-import persist, { deferred, debounced } from 'svelte-persist'
+import persist, { debounced, deferred } from 'svelte-persist'
 import { openDB } from 'idb'
 
 const USERNAME = 'user'
@@ -34,20 +34,19 @@ class API {
         return false
       })
   }
-  async events () {
-    const { set, subscribe } = debounced('forrestLastUpdate', '')
-    this.last = { subscribe }
-    this.query = persist('forrestUpdateQuery', {})
-    let last = get(this.last)
+  async events (self = this) {
+    self.last = self.last || debounced('forrestLastUpdate', '')
+    self.query = self.query || persist('forrestUpdateQuery', {})
+    let last = get(self.last)
 
     if (HOURAGO < last > MONTHAGO) {
       const res = await fetch(
-        `//events.${this.host}/batch/${last}`
+        `//events.${self.host}/batch/${last}`
       ).catch(error)
       if (!res || res.status !== 200) return
       const events = await res.json().catch(error)
       if (events && events.length) {
-        this.query.update(query => {
+        self.query.update(query => {
           events.forEach(event => {
             query[event.branch] = [
               ...(query[event.branch] || []),
@@ -57,20 +56,29 @@ class API {
           return { ...query }
         })
         last = maxTime(events)
-        set(last)
+        self.last.set(last)
       }
     }
 
-    new EventSource(
-      `//events.${this.host}/stream/${USERNAME}/${last}`
-    ).onmessage = e => {
-      this.query.update(query => {
+    const es = new EventSource(
+      `//events.${self.host}/stream/${USERNAME}/${last}`
+    )
+    es.onmessage = e => {
+      self.query.update(query => {
         const data = JSON.parse(e.data)
         if (!query) return query
         query[data.branch] = [...(query[data.branch] || []), data]
-        set(e.lastEventId)
+        self.last.set(e.lastEventId)
         return { ...query }
       })
+    }
+    es.onerror = () => {
+      if (es.readyState !== 2) return
+      console.log('server not responding')
+      setTimeout(() => {
+        console.log('reconnecting')
+        self.events()
+      }, 5000)
     }
   }
   db (name, indexes = false, validate = () => true) {
