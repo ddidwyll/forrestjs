@@ -21,7 +21,7 @@
   "author": "Phil D'Oz <ddidwyll@gmail.com>",
   "license": "MIT",
   "devDependencies": {
-    "eslint": "^6.4.0",
+    "eslint": "^6.5.1",
     "eslint-config-standard": "^12.0.0",
     "eslint-plugin-html": "^5.0.5",
     "eslint-plugin-import": "^2.17.3",
@@ -35,6 +35,6 @@
     "svelte-persist": "file:~/svelte-persist"
   },
   "dependencies": {
-    "idb": "^4.0.4"
+    "idb": "^4.0.5"
   }
 }

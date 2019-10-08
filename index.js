@@ -1,5 +1,5 @@
 import { writable, get, derived } from 'svelte/store'
-import persist, { debounced, deferred } from 'svelte-persist'
+import { persist, debounced, deferred } from 'svelte-persist'
 import { openDB } from 'idb'
 
 const USERNAME = 'user'
@@ -227,7 +227,7 @@ class DB {
     return fetch(
       `//tree.${this.host}/rest/${this.name}/${put ? item.id : ''}`,
       {
-        method: put ? 'PUT' : 'POST',
+        method: put ? 'PATCH' : 'POST',
         headers: HEADERS,
         body: JSON.stringify(item)
       }
@@ -254,7 +254,7 @@ class DB {
   }
   async _response (res) {
     if (!res) return 503
-    if (!~[204, 404].indexOf(res.status)) {
+    if (!~[200, 201, 204, 404].indexOf(res.status)) {
       const message = await res.json().catch(error)
       this.alert(message || 'success')
     }
