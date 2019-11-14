@@ -140,7 +140,7 @@ class DB {
       },
       get: async id => await this.db.get('store', id),
       post: async item => await this.db.put('store', item),
-      put: async item => await this.db.put('store', item),
+      patch: async item => await this.db.put('store', item),
       delete: async id => await this.db.delete('store', id)
     }
   }
@@ -153,7 +153,7 @@ class DB {
         Array.isArray(items) ? set(items) : undefined,
       post: async item =>
         (await update(items => [...items, item])) || item.id,
-      put: async item =>
+      patch: async item =>
         (await update(items => {
           const i = get(item.id, items)
           if (~i) items[i] = item
@@ -221,13 +221,13 @@ class DB {
           : null
       )
   }
-  pust (item, put = false) {
+  pust (item, patch = false) {
     if (!this.validate(item)) return this.alert('lol')
     this.take()
     return fetch(
-      `//tree.${this.host}/rest/${this.name}/${put ? item.id : ''}`,
+      `//tree.${this.host}/rest/${this.name}/${patch ? item.id : ''}`,
       {
-        method: put ? 'PATCH' : 'POST',
+        method: patch ? 'PATCH' : 'POST',
         headers: HEADERS,
         body: JSON.stringify(item)
       }
@@ -248,7 +248,7 @@ class DB {
     const res = await this.pust(item)
     return this._response(res)
   }
-  async put (item) {
+  async patch (item) {
     const res = await this.pust(item, true)
     return this._response(res)
   }
